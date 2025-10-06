@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.core.ParameterizedTypeReference;
 import reactor.core.publisher.Mono;
 
 import java.net.URI;
@@ -19,6 +20,9 @@ import java.util.Optional;
 @Service
 public class WebhookGenerationService {
     private static final Logger log = LoggerFactory.getLogger(WebhookGenerationService.class);
+
+    private static final ParameterizedTypeReference<Map<String,Object>> MAP_STRING_OBJECT =
+            new ParameterizedTypeReference<>() {};
 
     private final WebClient webClient;
     private final WebhookGenerateProperties properties;
@@ -40,12 +44,12 @@ public class WebhookGenerationService {
         GenerateWebhookRequest request = properties.toRequest();
         log.info("Generating webhook via POST {} for regNo={} email={}", properties.getUrl(), request.regNo(), request.email());
         try {
-            Map response = webClient.post()
+            Map<String,Object> response = webClient.post()
                     .uri(properties.getUrl())
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(request)
                     .retrieve()
-                    .bodyToMono(Map.class)
+                    .bodyToMono(MAP_STRING_OBJECT)
                     .timeout(Duration.ofSeconds(15))
                     .doOnError(err -> log.error("Failed calling webhook generation endpoint", err))
                     .onErrorResume(err -> Mono.empty())
@@ -57,19 +61,16 @@ public class WebhookGenerationService {
                 return;
             }
             log.debug("Webhook generation raw response keys: {}", response.keySet());
-            URI webhookUrl = (URI) extractWebhookUrl(response).orElse(null);
-            Optional<String> tokenOpt = extractToken(response);
-            String token = tokenOpt.orElse(null);
+            URI webhookUrl = extractWebhookUrl(response).orElse(null);
+            String token = extractToken(response).orElse(null);
             if (webhookUrl == null) {
                 log.warn("Could not locate webhook URL in response; keys: {}", response.keySet());
             } else {
-                // Explicitly print the webhook URL as requested
                 log.info("Webhook URL: {}", webhookUrl);
             }
             if (token == null) {
                 log.warn("JWT token not found in response (expected maybe token/jwt/jwtToken).");
             } else {
-                // Explicitly print the JWT token value as requested
                 log.info("JWT token: {}", token);
             }
             webhookContext.set(new WebhookContext.StoredWebhook(webhookUrl, token, response));
@@ -90,15 +91,10 @@ public class WebhookGenerationService {
                 }
             }
         }
-        // generic scan for any http URL string value
         return response.values().stream()
                 .filter(v -> v instanceof String s && s.startsWith("http"))
                 .map(v -> {
-                    try {
-                        return URI.create(v.toString());
-                    } catch (Exception e) {
-                        return null;
-                    }
+                    try { return URI.create(v.toString()); } catch (Exception e) { return null; }
                 })
                 .filter(Objects::nonNull)
                 .findFirst();
