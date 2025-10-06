@@ -58,16 +58,19 @@ public class WebhookGenerationService {
             }
             log.debug("Webhook generation raw response keys: {}", response.keySet());
             URI webhookUrl = (URI) extractWebhookUrl(response).orElse(null);
-            String token = extractToken(response).orElse(null).toString();
+            Optional<String> tokenOpt = extractToken(response);
+            String token = tokenOpt.orElse(null);
             if (webhookUrl == null) {
                 log.warn("Could not locate webhook URL in response; keys: {}", response.keySet());
             } else {
-                log.info("Obtained webhook URL: {}", webhookUrl);
+                // Explicitly print the webhook URL as requested
+                log.info("Webhook URL: {}", webhookUrl);
             }
             if (token == null) {
-                log.warn("No JWT token found in response (expected maybe token/jwt/jwtToken).");
+                log.warn("JWT token not found in response (expected maybe token/jwt/jwtToken).");
             } else {
-                log.info("Captured JWT token (hidden).");
+                // Explicitly print the JWT token value as requested
+                log.info("JWT token: {}", token);
             }
             webhookContext.set(new WebhookContext.StoredWebhook(webhookUrl, token, response));
         } catch (Exception e) {
