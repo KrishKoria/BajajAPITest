@@ -10,7 +10,7 @@ public class SolutionSubmissionProperties {
     private boolean enabled = true;
     /** Endpoint for submission (step 4). */
     private String url = "https://bfhldevapigw.healthrx.co.in/hiring/testWebhook/JAVA";
-    private String finalQuery = ""; // supplied via application.properties (solution.submit.final-query)
+    private String finalQuery = "";
     private long delayMs = 0L;
     private long waitForTokenTimeoutMs = 10000L;
     private long waitForTokenPollMs = 300L;

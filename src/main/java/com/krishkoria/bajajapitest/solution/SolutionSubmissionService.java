@@ -5,8 +5,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -44,16 +46,41 @@ public class SolutionSubmissionService {
         }
         waitForTokenIfNeeded();
         var stored = webhookContext.get().orElse(null);
-        if (stored == null || stored.jwtToken() == null || stored.jwtToken().isBlank()) {
+        if (stored == null) {
+            log.error("Cannot submit final query: webhook context empty.");
+            return;
+        }
+        String targetUrl = stored.webhookUrl() != null ? stored.webhookUrl().toString() : properties.getUrl();
+        if (stored.webhookUrl() != null) {
+            log.info("Using dynamically generated webhook URL (stored): {}", targetUrl);
+        } else {
+            log.warn("Stored webhook URL is null; falling back to configured submission URL: {}", targetUrl);
+        }
+        String rawToken = stored.jwtToken();
+        if (rawToken == null || rawToken.isBlank()) {
             log.error("Cannot submit final query: JWT token not available.");
             return;
         }
+
+        Map<String, Object> body = Map.of("finalQuery", query);
+        log.info("Preparing final query submission (length={} chars) to {}", query.length(), targetUrl);
+
+        // 1st attempt: raw token (no Bearer)
+        boolean success = attemptSubmission(targetUrl, body, rawToken, false);
+        if (!success) {
+            // If first attempt fails with 401 and token did not already start with Bearer, retry with Bearer schema
+            if (!rawToken.startsWith("Bearer ")) {
+                log.info("Retrying submission with 'Bearer ' prefix added to token.");
+                attemptSubmission(targetUrl, body, "Bearer " + rawToken, true);
+            }
+        }
+    }
+
+    private boolean attemptSubmission(String url, Map<String,Object> body, String authHeader, boolean isSecondAttempt) {
         try {
-            log.info("Submitting final query to {} (length={} chars)", properties.getUrl(), query.length());
-            Map<String,Object> body = Map.of("finalQuery", query);
             String response = webClient.post()
-                    .uri(properties.getUrl())
-                    .header(HttpHeaders.AUTHORIZATION, stored.jwtToken())
+                    .uri(url)
+                    .header(HttpHeaders.AUTHORIZATION, authHeader)
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(body)
                     .retrieve()
@@ -63,13 +90,27 @@ public class SolutionSubmissionService {
                     .onErrorResume(err -> Mono.empty())
                     .blockOptional().orElse("");
             if (response.isBlank()) {
-                log.warn("Submission completed but empty response body returned.");
+                log.warn("Submission completed but empty response body returned (attempt {} - auth header starts with: {}).", isSecondAttempt ? 2 : 1, prefix(authHeader));
             } else {
-                log.info("Submission response (truncated to 500 chars): {}", response.substring(0, Math.min(response.length(), 500)));
+                log.info("Submission response (truncated to 500 chars) [attempt {}]: {}", isSecondAttempt ? 2 : 1, response.substring(0, Math.min(response.length(), 500)));
             }
+            return true; // treat empty as success to avoid infinite concerns
+        } catch (WebClientResponseException wcre) {
+            if (wcre.getStatusCode() == HttpStatus.UNAUTHORIZED) {
+                log.warn("Received 401 Unauthorized on attempt {} (auth header starts with: {}).", isSecondAttempt ? 2 : 1, prefix(authHeader));
+                return false;
+            }
+            log.error("HTTP error during submission attempt {}: {}", isSecondAttempt ? 2 : 1, wcre.getStatusCode(), wcre);
+            return false;
         } catch (Exception e) {
-            log.error("Unexpected error during final query submission", e);
+            log.error("Unexpected error during submission attempt {}", isSecondAttempt ? 2 : 1, e);
+            return false;
         }
+    }
+
+    private String prefix(String authHeader) {
+        if (authHeader == null) return "null";
+        return authHeader.length() <= 15 ? authHeader : authHeader.substring(0, 15) + "...";
     }
 
     private void waitForTokenIfNeeded() {
@@ -86,4 +127,3 @@ public class SolutionSubmissionService {
         log.warn("Token not available after waiting {} ms; proceeding (may fail).", timeoutMs);
     }
 }
-

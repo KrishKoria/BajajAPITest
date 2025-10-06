@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
  * Executes after the webhook generation step to submit the final SQL query (step 4).
  */
 @Component
-@Order(Ordered.LOWEST_PRECEDENCE) // run after other high precedence startup tasks
+@Order(Ordered.LOWEST_PRECEDENCE)
 public class SolutionSubmissionRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(SolutionSubmissionRunner.class);
